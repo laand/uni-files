@@ -1,0 +1,200 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+EXEC SQL BEGIN DECLARE SECTION;
+	int stid;
+	VARCHAR gname[100];
+	VARCHAR lagebeschreibung[256];
+	float laenge;
+	float breite;
+      VARCHAR zustand[10];
+      VARCHAR typ[20];
+	VARCHAR fernziel[50];
+	VARCHAR nahziel[50];
+	float kmfern;
+	float kmnah;
+	VARCHAR pfeilrichtung[20];
+	char datum[11];
+	VARCHAR text[4096];
+      short lb_i, f_i, n_i, p_i, kmf_i, kmn_i,d_i; /* Indikatorvariablen zum Abfangen von NULL-Werten: */
+EXEC SQL END DECLARE SECTION;
+EXEC SQL INCLUDE sqlca; /*SQL communication area einbinden für Status und Fehlermeldung */
+
+EXEC SQL DECLARE Standort_cursor CURSOR FOR /* Cursor für alle kaputten Standorte einer Gemeinde*/
+   SELECT Stid, Lagebeschreibung, Laenge, Breite
+   FROM Standort S, Gemeinde G
+   WHERE gname = :gname AND G.Gid = S.Gemeinde 
+   AND EXISTS (SELECT WID FROM Wegweiser W WHERE W.Standort = S.Stid AND (Zustand = 'fehlerhaft' OR Zustand = 'fehlt'))
+   ORDER BY S.stid;
+
+EXEC SQL DECLARE Wegweiser_cursor CURSOR FOR
+   SELECT Typ, Fernziel, Nahziel, kmfern, kmnah, pfeilrichtung
+   FROM Wegweiser
+   WHERE Standort = :stid AND Zustand = :zustand;
+
+EXEC SQL DECLARE Kommentar_cursor CURSOR FOR
+SELECT to_char(Datum, 'dd.mm.yyyy'), Text FROM Kommentar WHERE Standort = :stid;
+
+int retcode; /* Ergebnis einer Fetch-Operation */
+
+int Anmeldung (); /* Logon in das ORACLE-Datenbanksystem */
+void druckeStandortliste (char *);
+
+main ()
+{
+ char gemeinde[100] = "";
+
+ if (Anmeldung ()) { /* if1 */
+  do {
+   printf("\n\nGeben Sie den Gemeindenamen ein, X fuer Abbruch: ");
+   gets(gemeinde);
+
+   if (strcmp(gemeinde,"X")!=0 && strcmp(gemeinde, "")!=0) druckeStandortliste(&gemeinde);
+  } while (strcmp(gemeinde,"X")!=0 && strcmp(gemeinde, "")!=0);
+ } /* end if1 */
+}
+
+int Anmeldung () /* Logon in das ORACLE-Datenbanksystem */
+{
+ EXEC SQL BEGIN DECLARE SECTION;
+	VARCHAR user[16], pwd[10]; /* UWA Benutzername und Passwort */
+ EXEC SQL END DECLARE SECTION;
+
+ /* Benutzer nach Name und Passwort fragen */
+ printf("Benutzername und DB-Verbindung: ");
+ gets(user.arr);
+ user.len = strlen (user.arr);
+ printf("Passwort: ");
+ gets(pwd.arr);
+ pwd.len = strlen (pwd.arr);
+ EXEC SQL CONNECT :user IDENTIFIED BY :pwd; /* Verbindung aufbauen */
+
+ if (sqlca.sqlcode == 0) {
+   printf("Verbunden mit ORACLE als %s\n\n", user.arr);
+   return (1);
+ }
+ else {
+  printf("\n\n FEHLER bei Anmeldung % .70s \n\n", sqlca.sqlerrm.sqlerrmc);
+  return (0);
+ }
+}
+
+int fetchStandort () {
+   EXEC SQL FETCH Standort_cursor INTO :stid, :lagebeschreibung:lb_i, :laenge, :breite;
+   if (sqlca.sqlcode < 0) { /* spezifische Fehlerbehandlung */
+     printf("% .70s \n\n", sqlca.sqlerrm.sqlerrmc);
+     return (sqlca.sqlcode);
+   }
+   if (lb_i != 0) lagebeschreibung.len = 0; /* lagebeschreibung = "" */
+   lagebeschreibung.arr[lagebeschreibung.len] = '\0';
+   return (sqlca.sqlcode);
+}
+
+int fetchWegweiser () {
+  EXEC SQL FETCH Wegweiser_cursor INTO :typ, :fernziel:f_i, :nahziel:n_i, :kmfern:kmf_i, :kmnah:kmn_i, :pfeilrichtung:p_i;
+  if (sqlca.sqlcode < 0) { /* spezifische Fehlerbehandlung */
+    printf("% .70s \n\n", sqlca.sqlerrm.sqlerrmc);
+    return(sqlca.sqlcode);
+  }
+  if (f_i != 0) fernziel.len = 0; /* fernziel = "" */
+  if (n_i != 0) nahziel.len = 0; /* nahziel = "" */
+  if (p_i != 0) pfeilrichtung.len = 0; /* pfeilrichtung = "" */
+  fernziel.arr[fernziel.len] = '\0';
+  nahziel.arr[nahziel.len] = '\0';
+  pfeilrichtung.arr[pfeilrichtung.len] = '\0';
+  typ.arr[typ.len] = '\0';
+  return (sqlca.sqlcode);
+}
+
+int fetchKommentar () {
+  EXEC SQL FETCH Kommentar_cursor INTO :datum:d_i, :text;
+  if (sqlca.sqlcode < 0) { /* spezifische Fehlerbehandlung */
+    printf("% .70s \n\n", sqlca.sqlerrm.sqlerrmc);
+    return(sqlca.sqlcode);
+  }
+  if (d_i != 0) strcpy(datum, "          ");
+  text.arr[text.len] = '\0';
+  return (sqlca.sqlcode);
+}
+
+void druckeWegweiser (char * Zustand) {
+  if (strcmp(Zustand, "fehlt") == 0) printf(" Fehlende Wegweiser: ");
+  else printf (" Fehlerhafte Wegweiser: ");
+  strcpy(zustand.arr, Zustand);
+  zustand.len = strlen(zustand.arr);
+  EXEC SQL OPEN Wegweiser_cursor;
+  EXEC SQL FETCH Wegweiser_cursor INTO :typ, :fernziel:f_i, :nahziel:n_i, :kmfern:kmf_i, :kmnah:kmn_i, :pfeilrichtung:p_i;
+  if (f_i != 0) fernziel.len = 0; /* fernziel = "" */
+  if (n_i != 0) nahziel.len = 0; /* nahziel = "" */
+  if (p_i != 0) pfeilrichtung.len = 0; /* pfeilrichtung = "" */
+  fernziel.arr[fernziel.len] = '\0';
+  nahziel.arr[nahziel.len] = '\0';
+  pfeilrichtung.arr[pfeilrichtung.len] = '\0';
+  typ.arr[typ.len] = '\0';
+  if (retcode < 0) return;
+  else if (retcode > 0){
+    printf("keine\n\n"); /* Abfrage lieferte keinen Datensatz */
+  } else printf("\n");
+  while (retcode == 0) { /* drucke alle Wegweiser des Wegweiser-Cursors */
+    if (strcmp(typ.arr, "Haupt") == 0) {
+      if (kmfern < 10.0) printf("\t%-20.20s  %.1f\n", fernziel.arr, kmfern);
+      else  printf("\t%-20.20s  %.0f\n", fernziel.arr, kmfern);
+      if (kmnah < 10.0) printf("\t%-20.20s  %.1f\n\n", nahziel.arr, kmnah);
+      else printf("\t%-20.20s  %.0f\n\n", nahziel.arr, kmnah);
+    } else printf("\tZwischenwegweiser %s\n\n", pfeilrichtung.arr);
+
+    retcode = fetchWegweiser ();
+  } /* end while */
+}
+
+void druckeKommentare () {
+ EXEC SQL OPEN Kommentar_cursor;
+ retcode = fetchKommentar ();
+ if (retcode == 0) printf (" Kommentare zum Standort: \n");
+ while (retcode == 0) {
+  printf("   %s %.80s\n", datum, text.arr);
+  retcode = fetchKommentar ();
+ }
+}
+/* Funktion druckt die Standortliste für die Gemeinde mit dem Namen gname, **
+** kein Rückgabewert                                                       */
+void druckeStandortliste(char * gemeinde) {
+ EXEC SQL BEGIN DECLARE SECTION; /* UWA */
+ EXEC SQL END DECLARE SECTION;
+
+ strcpy(gname.arr, gemeinde);
+ gname.len = strlen(gname.arr);
+
+ EXEC SQL OPEN Standort_cursor; /* Abfrage ausführen */
+ if (sqlca.sqlcode < 0) { /* spezifische Fehlerbehandlung */
+   printf("Fehler bei Standortabfrage\n");
+   printf("% .70s \n\n", sqlca.sqlerrm.sqlerrmc);
+   return;
+ }
+
+ /* Hole ersten Standort der Gemeinde in UWA */
+ retcode = fetchStandort ();
+ if (retcode < 0) return;
+ else if (retcode > 0){
+   printf("Gemeinde mit diesem Namen nicht vorhanden oder Gemeinde hat keinen Standort mit defekten Wegweisern\n");
+   return;
+ }
+ /* Standortliste drucken */
+ printf ("Standorte mit fehlerhaften oder fehlenden Wegweisern in der Gemeinde %s\n\n", gemeinde);
+
+ while (retcode == 0) {
+  printf("Standort Nr. %i am Punkt (%f, %f)\n", stid, laenge, breite);
+  printf("Lagebeschreibung: %s\n\n", lagebeschreibung.arr);
+  
+  druckeWegweiser ("fehlt");
+  druckeWegweiser ("fehlerhaft");
+  druckeKommentare ();
+   
+  retcode = fetchStandort(); /* Hole nächsten Standort in UWA */
+ } /* end while */
+
+ EXEC SQL CLOSE Wegweiser_cursor;
+ EXEC SQL CLOSE Standort_cursor; /* Speicherplatz der Abfrage freigeben */
+ return;
+}
